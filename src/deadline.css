@@ -1,1 +1,2 @@
-.deadline-note{grid-column:1/-1;padding:12px 14px;border-radius:5px;background:#f3f7f2;color:#38745a;font-family:Inter,"PingFang SC",sans-serif;font-size:13px}.deadline-note.expired{background:#e4f3eb;color:#176b48}
+.stat-note{display:block;margin-top:7px;color:#38745a;font-family:Inter,"PingFang SC",sans-serif;font-size:12px;font-weight:400;line-height:1.45}
+.unlock-note{margin-top:18px;padding:14px;border:1px solid #dbe8df;border-radius:5px;background:#f5faf7;color:#4c6456;font-family:Inter,"PingFang SC",sans-serif;font-size:12px;line-height:1.55}.unlock-note strong{display:block;margin-bottom:7px;color:#287654;font-size:13px}.unlock-note ul{margin:0;padding-left:18px}.unlock-note li+li{margin-top:4px}

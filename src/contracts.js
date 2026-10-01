@@ -5,6 +5,7 @@ export const lock01Abi = [
   'function TOKEN01() view returns (address)',
   'function TIMEOUT_DEADLINE() view returns (uint256)',
   'function getCurrentPrice() view returns (uint256)',
+  'function getMinBalance(address addr) view returns (uint256)',
   'function userLockers(address) view returns (uint256 totalLocked,uint256 balance,bytes32 data)',
   'function lock(uint256 _amount,bytes32 _data)',
   'function claim()'
