@@ -8,10 +8,19 @@ import { SiCoinbase, SiWalletconnect } from 'react-icons/si'
 import { LOCK01_ADDRESS, PUBLIC_RPC, erc20Abi, lock01Abi } from './contracts'
 import './styles.css'
 import './wallet-modal.css'
+import './deadline.css'
 
 const emptyPosition = { locked: '—', claimable: '—', data: '—', balance: '连接钱包后显示' }
 const shortAddress = (value) => value ? `${value.slice(0, 6)}…${value.slice(-4)}` : '—'
 const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID
+const formatDeadline = (value) => {
+  const timestamp = Number(value)
+  if (!timestamp) return { text: '未设置', expired: false }
+  return {
+    text: new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'medium', hour12: false }).format(new Date(timestamp * 1000)),
+    expired: Date.now() >= timestamp * 1000
+  }
+}
 
 function App() {
   const [wallet, setWallet] = useState(null)
@@ -19,7 +28,7 @@ function App() {
   const [amount, setAmount] = useState('')
   const [data, setData] = useState('')
   const [position, setPosition] = useState(emptyPosition)
-  const [market, setMarket] = useState({ current: '—', eth: '—', perEth: '—', token: '—' })
+  const [market, setMarket] = useState({ current: '—', deadline: '—', deadlineExpired: false })
   const [notice, setNotice] = useState(null)
   const [busy, setBusy] = useState('')
   const [walletModalOpen, setWalletModalOpen] = useState(false)
@@ -39,8 +48,9 @@ function App() {
   const loadMarket = useCallback(async () => {
     try {
       const readContract = new Contract(LOCK01_ADDRESS, lock01Abi, new JsonRpcProvider(PUBLIC_RPC))
-      const [current, eth, perEth, tokenAddress] = await Promise.all([readContract.getCurrentPrice(), readContract.getEthPrice(), readContract.getPerETH(), readContract.TOKEN01()])
-      setMarket({ current: formatUnits(current, 18), eth: `$${formatUnits(eth, 18)}`, perEth: formatUnits(perEth, 18), token: shortAddress(tokenAddress) })
+      const [current, timeoutDeadline] = await Promise.all([readContract.getCurrentPrice(), readContract.TIMEOUT_DEADLINE()])
+      const deadline = formatDeadline(timeoutDeadline)
+      setMarket({ current: formatUnits(current, 18), deadline: deadline.text, deadlineExpired: deadline.expired })
     } catch { /* A public RPC failure should not block wallet interaction. */ }
   }, [])
 
@@ -178,12 +188,12 @@ function App() {
 
   return <main className="shell">
     <nav className="nav"><div className="brand"><div className="logo">⌁</div>LOCK01 <small>Ethereum Token Locker</small></div><div className="row">{wallet ? <><button className="button ghost compact" onClick={copyAddress}>已连接 · {shortAddress(wallet.address)} <FiCopy aria-hidden="true" /></button><button className="button ghost" onClick={disconnect}>断开连接</button></> : <button className="button" onClick={() => setWalletModalOpen(true)}>连接钱包</button>}</div></nav>
-    <section className="hero"><div><div className="eyebrow">ON-CHAIN · SELF-CUSTODY</div><h1>锁定代币，<br />在价格条件满足时领取。</h1><p>直接与已部署的 Lock01 智能合约交互。所有操作均由你的钱包签名并在以太坊主网上执行。</p></div><div className="contract">合约地址<br /><a target="_blank" rel="noreferrer" href={`https://etherscan.io/address/${LOCK01_ADDRESS}#code`}>{shortAddress(LOCK01_ADDRESS)} ↗</a></div></section>
+    <section className="hero"><div><div className="eyebrow">ON-CHAIN · SELF-CUSTODY</div><h1>锁定代币，<br />在价格条件满足时领取。</h1><p>直接与已部署的 Lock01 智能合约交互。所有操作均由你的钱包签名并在以太坊主网上执行。</p></div></section>
     <section className="grid">
       <article className="card"><h2>我的仓位</h2><p className="sub">连接钱包后自动读取当前地址在合约中的锁仓信息。</p><div className="statgrid"><Stat title="已锁定" value={position.locked} /><Stat title="可领取余额" value={position.claimable} /><Stat title="锁仓数据（bytes32）" value={position.data} full /></div><button className="button ghost wide" onClick={refresh}>刷新数据</button><div className="claim"><label className="label">领取已满足条件的代币</label><button className="button wide" disabled={!connected || Boolean(busy)} onClick={() => send('领取交易', () => wallet.contract.claim())}>{isBusy('领取交易') ? '等待确认…' : '领取（Claim）'}</button></div></article>
       <article className="card"><h2>锁定代币</h2><p className="sub">系统会检查当前授权额度，仅在额度不足时请求新的授权。</p><label className="label">锁定数量</label><div className="row"><input className="field" inputMode="decimal" placeholder="0.0" value={amount} onChange={(e) => setAmount(e.target.value)} /><button className="button ghost compact" onClick={setMax}>MAX</button></div><div className="mini">钱包余额：{position.balance}</div><label className="label">附加数据（可选文本）</label><input className="field" maxLength="31" placeholder="最多 31 个 UTF-8 字节，将自动编码为 bytes32" value={data} onChange={(e) => setData(e.target.value)} /><div className="actions">{needsApproval ? <button className="button" disabled={!connected || Boolean(busy)} onClick={approve}>{isBusy('授权交易') ? '等待确认…' : '授权代币'}</button> : <button className="button" disabled={!connected || Boolean(busy)} onClick={lock}>{isBusy('锁定交易') ? '等待确认…' : '确认锁定'}</button>}</div><div className="notice">提示：附加数据会以 UTF-8 文本自动编码为 bytes32。锁定和领取会产生主网 Gas 费；本页面不托管资产，也不会请求助记词或私钥。</div></article>
-      <article className="card full"><h2>合约行情</h2><p className="sub">合约暴露的链上读数，用于帮助核对价格与条件。</p><div className="statgrid"><Stat title="当前价格" value={market.current} /><Stat title="ETH / USD 价格" value={market.eth} /><Stat title="每 ETH 可得数量" value={market.perEth} /><Stat title="合约 TOKEN01" value={market.token} /></div></article>
-    </section><p className="footer">使用 <a target="_blank" rel="noreferrer" href={`https://etherscan.io/address/${LOCK01_ADDRESS}#code`}>Etherscan 已验证合约</a> · 请仅在以太坊主网操作</p>
+      <article className="card full"><h2>合约行情</h2><p className="sub">合约暴露的链上当前价格与超时取回时间。</p><div className="statgrid"><Stat title="当前价格" value={market.current} /><Stat title="TIMEOUT_DEADLINE" value={market.deadline} /><div className={`deadline-note ${market.deadlineExpired ? 'expired' : ''}`}>{market.deadlineExpired ? '已到期：全部锁仓的 01 可以取回。' : '未到期：达到该时间后，全部锁仓的 01 可以取回。'}</div></div></article>
+    </section><p className="footer"><a target="_blank" rel="noreferrer" href={`https://etherscan.io/address/${LOCK01_ADDRESS}#code`}>在 Etherscan 查看已验证合约 ↗</a></p>
     {notice && <div className={`status show ${notice.type}`}>{notice.text}</div>}
     {walletModalOpen && <div className="wallet-overlay" role="presentation" onMouseDown={() => setWalletModalOpen(false)}><section className="wallet-modal" role="dialog" aria-modal="true" aria-labelledby="wallet-modal-title" onMouseDown={(event) => event.stopPropagation()}><div className="wallet-list"><div className="wallet-modal-head"><h2 id="wallet-modal-title">连接钱包</h2><button className="modal-close" onClick={() => setWalletModalOpen(false)} aria-label="关闭"><FiX /></button></div><p className="wallet-kicker">常用钱包</p><button className="wallet-option" onClick={() => selectWallet(connect)}><FaRainbow className="wallet-icon rainbow" /><span>Rainbow</span></button><button className="wallet-option" onClick={() => selectWallet(connect)}><SiCoinbase className="wallet-icon base" /><span>Base</span></button><button className="wallet-option" onClick={() => selectWallet(connect)}><FaFirefox className="wallet-icon metamask" /><span>MetaMask</span></button><button className="wallet-option" onClick={() => selectWallet(connectWalletConnect)}><SiWalletconnect className="wallet-icon walletconnect" /><span>WalletConnect</span></button></div><aside className="wallet-info"><h3>什么是钱包？</h3><InfoRow icon={<FiShield />} title="数字资产的安全入口" text="钱包用于发送、接收、存储和查看你的链上资产。" /><InfoRow icon={<FiKey />} title="更安全的登录方式" text="无需创建新账户或密码，只需连接你的钱包即可开始。" /><a className="wallet-learn" href="https://ethereum.org/wallets/" target="_blank" rel="noreferrer">了解钱包</a></aside></section></div>}
   </main>

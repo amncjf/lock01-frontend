@@ -3,9 +3,8 @@ export const PUBLIC_RPC = 'https://ethereum-rpc.publicnode.com'
 
 export const lock01Abi = [
   'function TOKEN01() view returns (address)',
+  'function TIMEOUT_DEADLINE() view returns (uint256)',
   'function getCurrentPrice() view returns (uint256)',
-  'function getEthPrice() view returns (uint256)',
-  'function getPerETH() view returns (uint256)',
   'function userLockers(address) view returns (uint256 totalLocked,uint256 balance,bytes32 data)',
   'function lock(uint256 _amount,bytes32 _data)',
   'function claim()'
