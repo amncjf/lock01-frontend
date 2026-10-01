@@ -1,0 +1,17 @@
+.hero-balance {
+  display: inline-flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-top: 18px;
+  padding: 10px 12px;
+  border: 1px solid #deded6;
+  border-radius: 8px;
+  background: #f5f5ef;
+  color: #6d7069;
+  font-size: 13px;
+}
+
+.hero-balance strong {
+  color: #22251f;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

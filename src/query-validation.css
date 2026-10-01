@@ -1,0 +1,10 @@
+.input-error {
+  margin: 8px 0 0;
+  color: #b54c42;
+  font-size: 12px;
+}
+
+.field[aria-invalid='true'] {
+  border-color: #b54c42;
+  outline-color: #b54c42;
+}
