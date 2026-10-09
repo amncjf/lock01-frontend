@@ -1,0 +1,3 @@
+.discovered-wallet-icon { object-fit: contain; background: #f4f5f7; }
+.discovered-wallet-fallback { display: grid; place-items: center; color: #6e7480; background: #eef0f3; font-size: 18px; }
+.wallet-empty { margin: 0; padding: 8px 0 14px; color: #858b95; font-size: 13px; }

@@ -3,8 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserProvider, Contract, JsonRpcProvider, ZeroHash, decodeBytes32String, encodeBytes32String, formatUnits, getAddress, isAddress, parseUnits } from 'ethers'
 import EthereumProvider from '@walletconnect/ethereum-provider'
 import { FiCopy, FiKey, FiShield, FiX } from 'react-icons/fi'
-import { FaFirefox, FaRainbow } from 'react-icons/fa'
-import { SiBinance, SiCoinbase, SiWalletconnect } from 'react-icons/si'
+import { SiWalletconnect } from 'react-icons/si'
 import { LOCK01_ADDRESS, PUBLIC_RPC, erc20Abi, lock01Abi } from './contracts'
 import './styles.css'
 import './wallet-modal.css'
@@ -14,6 +13,7 @@ import './binance.css'
 import './foxwallet.css'
 import './query-validation.css'
 import './hero-balance.css'
+import './eip6963.css'
 
 const emptyPosition = { locked: '—', lockerBalance: '—', lockQuantity: '—', claimable: '—', data: '—', walletBalance: '连接钱包后显示' }
 const shortAddress = (value) => value ? `${value.slice(0, 6)}…${value.slice(-4)}` : '—'
@@ -42,6 +42,7 @@ function App() {
   const [busy, setBusy] = useState('')
   const [walletModalOpen, setWalletModalOpen] = useState(false)
   const [needsApproval, setNeedsApproval] = useState(false)
+  const [injectedWallets, setInjectedWallets] = useState([])
 
   const showNotice = useCallback((text, type = '') => {
     setNotice({ text, type })
@@ -117,9 +118,48 @@ function App() {
     return () => { active = false }
   }, [amount, token, wallet])
   useEffect(() => {
+    const providers = new Map()
+    const onAnnounceProvider = ({ detail }) => {
+      if (!detail?.info?.uuid || !detail.provider) return
+      providers.set(detail.info.uuid, detail)
+      setInjectedWallets([...providers.values()])
+    }
+    window.addEventListener('eip6963:announceProvider', onAnnounceProvider)
+    window.dispatchEvent(new Event('eip6963:requestProvider'))
+    const fallbackTimer = window.setTimeout(() => {
+      if (!providers.size && window.ethereum) {
+        providers.set('legacy-injected-provider', {
+          info: { uuid: 'legacy-injected-provider', name: '浏览器钱包', icon: '', rdns: 'injected' },
+          provider: window.ethereum
+        })
+        setInjectedWallets([...providers.values()])
+      }
+    }, 250)
+    return () => {
+      window.clearTimeout(fallbackTimer)
+      window.removeEventListener('eip6963:announceProvider', onAnnounceProvider)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!window.ethereum) return undefined
     connect(true)
-    const onAccountsChanged = () => window.location.reload()
+    const onAccountsChanged = (accounts) => {
+      // 1. 获取新地址（如果没有连接，accounts 为空数组）
+      const newAccount = accounts.length > 0 ? accounts[0] : null;
+
+      // 2. 关键防御：如果新老地址一样，绝对不要重复执行
+      if (newAccount === wallet.address) return;
+
+      // 3. 优雅处理：如果是首次初始化（currentAccount 之前为 null），不刷新
+      // 只有当用户在钱包里手动切换了账号，才执行数据更新或页面刷新
+      if (wallet !== null) {
+        console.log("检测到账号真正改变，正在刷新数据...");
+        // 推荐：执行你的数据初始化函数，例如：fetchUserData();
+        // 如果实在想刷新页面，此时再执行：
+        window.location.reload();
+      }
+    };
     const onChainChanged = () => window.location.reload()
     window.ethereum.on('accountsChanged', onAccountsChanged)
     window.ethereum.on('chainChanged', onChainChanged)
@@ -152,6 +192,10 @@ function App() {
   async function connect(silent = false) {
     if (!window.ethereum) return showNotice('未检测到钱包，请安装 MetaMask 等 EVM 钱包', 'error')
     return useProvider(window.ethereum, 'injected', silent)
+  }
+
+  async function connectInjectedWallet(walletDetail) {
+    return useProvider(walletDetail.provider, walletDetail.info.rdns || walletDetail.info.name)
   }
 
   async function connectWalletConnect() {
@@ -255,7 +299,7 @@ function App() {
       <article className="card full"><h2>合约行情</h2><p className="sub">合约暴露的链上当前价格、锁仓总量与超时取回时间。</p><div className="statgrid"><Stat title="当前价格" value={market.current} /><Stat title="锁仓总量" value={market.totalLocked} /><Stat title="TIMEOUT_DEADLINE" value={market.deadline} note={market.deadlineExpired ? '已到期：全部锁仓的 01 可以取回。' : '未到期：达到该时间后，全部锁仓的 01 可以取回。'} /></div></article>
     </section><p className="footer"><a target="_blank" rel="noreferrer" href={`https://etherscan.io/address/${LOCK01_ADDRESS}#code`}>在 Etherscan 查看已验证合约 ↗</a><span aria-hidden="true"> · </span><a target="_blank" rel="noreferrer" href="https://github.com/amncjf/lock01-frontend">本站点源代码 ↗</a></p>
     {notice && <div className={`status show ${notice.type}`}>{notice.text}</div>}
-    {walletModalOpen && <div className="wallet-overlay" role="presentation" onMouseDown={() => setWalletModalOpen(false)}><section className="wallet-modal" role="dialog" aria-modal="true" aria-labelledby="wallet-modal-title" onMouseDown={(event) => event.stopPropagation()}><div className="wallet-list"><div className="wallet-modal-head"><h2 id="wallet-modal-title">连接钱包</h2><button className="modal-close" onClick={() => setWalletModalOpen(false)} aria-label="关闭"><FiX /></button></div><p className="wallet-kicker">常用钱包</p><button className="wallet-option" onClick={() => selectWallet(connect)}><FaRainbow className="wallet-icon rainbow" /><span>Rainbow</span></button><button className="wallet-option" onClick={() => selectWallet(connect)}><SiCoinbase className="wallet-icon base" /><span>Base</span></button><button className="wallet-option" onClick={() => selectWallet(connect)}><FaFirefox className="wallet-icon metamask" /><span>MetaMask</span></button><button className="wallet-option" onClick={() => selectWallet(connectFoxWallet)}><FaFirefox className="wallet-icon fox" /><span>FoxWallet</span></button><button className="wallet-option" onClick={() => selectWallet(connectBinanceWallet)}><SiBinance className="wallet-icon binance" /><span>币安钱包</span></button><button className="wallet-option" onClick={() => selectWallet(connectWalletConnect)}><SiWalletconnect className="wallet-icon walletconnect" /><span>WalletConnect</span></button></div><aside className="wallet-info"><h3>什么是钱包？</h3><InfoRow icon={<FiShield />} title="数字资产的安全入口" text="钱包用于发送、接收、存储和查看你的链上资产。" /><InfoRow icon={<FiKey />} title="更安全的登录方式" text="无需创建新账户或密码，只需连接你的钱包即可开始。" /><a className="wallet-learn" href="https://ethereum.org/wallets/" target="_blank" rel="noreferrer">了解钱包</a></aside></section></div>}
+    {walletModalOpen && <div className="wallet-overlay" role="presentation" onMouseDown={() => setWalletModalOpen(false)}><section className="wallet-modal" role="dialog" aria-modal="true" aria-labelledby="wallet-modal-title" onMouseDown={(event) => event.stopPropagation()}><div className="wallet-list"><div className="wallet-modal-head"><h2 id="wallet-modal-title">连接钱包</h2><button className="modal-close" onClick={() => setWalletModalOpen(false)} aria-label="关闭"><FiX /></button></div><p className="wallet-kicker">检测到的钱包</p>{injectedWallets.length ? injectedWallets.map((walletDetail) => <button className="wallet-option" key={walletDetail.info.uuid} onClick={() => selectWallet(() => connectInjectedWallet(walletDetail))}>{walletDetail.info.icon ? <img className="wallet-icon discovered-wallet-icon" src={walletDetail.info.icon} alt="" /> : <span className="wallet-icon discovered-wallet-fallback">◇</span>}<span>{walletDetail.info.name}</span></button>) : <p className="wallet-empty">未检测到浏览器钱包。</p>}<button className="wallet-option" onClick={() => selectWallet(connectWalletConnect)}><SiWalletconnect className="wallet-icon walletconnect" /><span>WalletConnect</span></button></div><aside className="wallet-info"><h3>什么是钱包？</h3><InfoRow icon={<FiShield />} title="数字资产的安全入口" text="钱包用于发送、接收、存储和查看你的链上资产。" /><InfoRow icon={<FiKey />} title="更安全的登录方式" text="无需创建新账户或密码，只需连接你的钱包即可开始。" /><a className="wallet-learn" href="https://ethereum.org/wallets/" target="_blank" rel="noreferrer">了解钱包</a></aside></section></div>}
   </main>
 }
 
