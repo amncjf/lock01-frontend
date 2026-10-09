@@ -1,10 +1,10 @@
 import { StrictMode, useCallback, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserProvider, Contract, JsonRpcProvider, ZeroHash, decodeBytes32String, encodeBytes32String, formatUnits, getAddress, isAddress, parseUnits } from 'ethers'
+import { BrowserProvider, Contract, FallbackProvider, JsonRpcProvider, ZeroHash, decodeBytes32String, encodeBytes32String, formatUnits, getAddress, isAddress, parseUnits } from 'ethers'
 import EthereumProvider from '@walletconnect/ethereum-provider'
 import { FiCopy, FiKey, FiShield, FiX } from 'react-icons/fi'
 import { SiWalletconnect } from 'react-icons/si'
-import { LOCK01_ADDRESS, PUBLIC_RPC, erc20Abi, lock01Abi } from './contracts'
+import { LOCK01_ADDRESS, MULTICALL3_ADDRESS, PUBLIC_RPCS, TOKEN01_ADDRESS, TOKEN01_DECIMALS, TOKEN01_SYMBOL, erc20Abi, lock01Abi, multicall3Abi } from './contracts'
 import './styles.css'
 import './wallet-modal.css'
 import './deadline.css'
@@ -19,6 +19,7 @@ const emptyPosition = { locked: '—', lockerBalance: '—', lockQuantity: '—'
 const shortAddress = (value) => value ? `${value.slice(0, 6)}…${value.slice(-4)}` : '—'
 const formatPositionToken = (value, decimals, symbol) => `${Number(formatUnits(value, decimals)).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${symbol}`
 const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID
+const readProvider = new FallbackProvider(PUBLIC_RPCS.map((url) => new JsonRpcProvider(url, 1, { staticNetwork: true })), 1)
 const formatDeadline = (value) => {
   const timestamp = Number(value)
   if (!timestamp) return { text: '未设置', expired: false }
@@ -57,13 +58,12 @@ function App() {
 
   const loadMarket = useCallback(async () => {
     try {
-      const readProvider = new JsonRpcProvider(PUBLIC_RPC)
       const readContract = new Contract(LOCK01_ADDRESS, lock01Abi, readProvider)
-      const [current, timeoutDeadline, tokenAddress] = await Promise.all([readContract.getCurrentPrice(), readContract.TIMEOUT_DEADLINE(), readContract.TOKEN01()])
-      const readToken = new Contract(tokenAddress, erc20Abi, readProvider)
-      const [totalLocked, tokenDecimals, tokenSymbol] = await Promise.all([readToken.balanceOf(LOCK01_ADDRESS), readToken.decimals(), readToken.symbol()])
+      const [current, timeoutDeadline] = await Promise.all([readContract.getCurrentPrice(), readContract.TIMEOUT_DEADLINE()])
+      const readToken = new Contract(TOKEN01_ADDRESS, erc20Abi, readProvider)
+      const totalLocked = await readToken.balanceOf(LOCK01_ADDRESS)
       const deadline = formatDeadline(timeoutDeadline)
-      setMarket({ current: formatUnits(current, 18), totalLocked: `${Number(formatUnits(totalLocked, tokenDecimals)).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${tokenSymbol}`, deadline: deadline.text, deadlineExpired: deadline.expired })
+      setMarket({ current: formatUnits(current, 18), totalLocked: `${Number(formatUnits(totalLocked, TOKEN01_DECIMALS)).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${TOKEN01_SYMBOL}`, deadline: deadline.text, deadlineExpired: deadline.expired })
     } catch { /* A public RPC failure should not block wallet interaction. */ }
   }, [])
 
@@ -78,19 +78,26 @@ function App() {
       let decimals = token?.decimals
       let symbol = token?.symbol
       if (!useWalletProvider) {
-        const provider = new JsonRpcProvider(PUBLIC_RPC)
-        positionContract = new Contract(LOCK01_ADDRESS, lock01Abi, provider)
-        positionToken = new Contract(await positionContract.TOKEN01(), erc20Abi, provider)
-        ;[decimals, symbol] = await Promise.all([positionToken.decimals(), positionToken.symbol()])
-        decimals = Number(decimals)
+        positionContract = new Contract(LOCK01_ADDRESS, lock01Abi, readProvider)
+        positionToken = new Contract(TOKEN01_ADDRESS, erc20Abi, readProvider)
+        decimals = TOKEN01_DECIMALS
+        symbol = TOKEN01_SYMBOL
       }
-      const [locker, balance, minBalance] = await Promise.all([positionContract.userLockers(address), positionToken.balanceOf(address), positionContract.getMinBalance(address)])
-      const claimable = locker.balance > minBalance ? locker.balance - minBalance : 0n
+      const multicall = new Contract(MULTICALL3_ADDRESS, multicall3Abi, readProvider)
+      const results = await multicall.aggregate3.staticCall([
+        { target: LOCK01_ADDRESS, allowFailure: false, callData: positionContract.interface.encodeFunctionData('userLockers', [address]) },
+        { target: TOKEN01_ADDRESS, allowFailure: false, callData: positionToken.interface.encodeFunctionData('balanceOf', [address]) },
+        { target: LOCK01_ADDRESS, allowFailure: false, callData: positionContract.interface.encodeFunctionData('getMinBalance', [address]) }
+      ])
+      const [totalLocked, lockerBalance, lockerDataRaw] = positionContract.interface.decodeFunctionResult('userLockers', results[0].returnData)
+      const [balance] = positionToken.interface.decodeFunctionResult('balanceOf', results[1].returnData)
+      const [minBalance] = positionContract.interface.decodeFunctionResult('getMinBalance', results[2].returnData)
+      const claimable = lockerBalance > minBalance ? lockerBalance - minBalance : 0n
       let lockerData = '—'
-      if (locker.data !== ZeroHash) {
-        try { lockerData = decodeBytes32String(locker.data) } catch { lockerData = locker.data }
+      if (lockerDataRaw !== ZeroHash) {
+        try { lockerData = decodeBytes32String(lockerDataRaw) } catch { lockerData = lockerDataRaw }
       }
-      const result = { locked: formatPositionToken(locker.totalLocked, decimals, symbol), lockerBalance: formatPositionToken(locker.balance, decimals, symbol), lockQuantity: formatPositionToken(minBalance, decimals, symbol), claimable: formatPositionToken(claimable, decimals, symbol), data: lockerData, walletBalance: formatPositionToken(balance, decimals, symbol) }
+      const result = { locked: formatPositionToken(totalLocked, decimals, symbol), lockerBalance: formatPositionToken(lockerBalance, decimals, symbol), lockQuantity: formatPositionToken(minBalance, decimals, symbol), claimable: formatPositionToken(claimable, decimals, symbol), data: lockerData, walletBalance: formatPositionToken(balance, decimals, symbol) }
       if (isAddressLookup) {
         setQueryAddress(address)
         setQueryPosition(result)
@@ -179,10 +186,9 @@ function App() {
       const address = await signer.getAddress()
       const nativeBalance = await provider.getBalance(address)
       const contract = new Contract(LOCK01_ADDRESS, lock01Abi, signer)
-      const tokenAddress = await contract.TOKEN01()
-      const tokenContract = new Contract(tokenAddress, erc20Abi, signer)
-      let decimals = 18, symbol = 'TOKEN01'
-      try { [decimals, symbol] = [Number(await tokenContract.decimals()), await tokenContract.symbol()] } catch { /* Token metadata is optional. */ }
+      const tokenContract = new Contract(TOKEN01_ADDRESS, erc20Abi, signer)
+      const decimals = TOKEN01_DECIMALS
+      const symbol = TOKEN01_SYMBOL
       setWallet({ address, contract, source, eip1193Provider, nativeBalance: `${Number(formatUnits(nativeBalance, 18)).toLocaleString(undefined, { maximumFractionDigits: 4 })} ETH` })
       setToken({ contract: tokenContract, decimals, symbol })
       if (!silent) showNotice('钱包已连接', 'success')
