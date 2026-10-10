@@ -1,0 +1,28 @@
+.footer-links {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 38px;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.footer-links a {
+  color: #555752;
+  text-decoration: none;
+  transition: color .15s ease;
+}
+
+.footer-links a:hover {
+  color: #1e805a;
+}
+
+.footer-links span {
+  color: #898a83;
+}
+
+@media (max-width: 520px) {
+  .footer-links { gap: 9px; font-size: 14px; }
+}
