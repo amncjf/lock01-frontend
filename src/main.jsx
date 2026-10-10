@@ -262,7 +262,7 @@ function App() {
       showNotice(`${label}，等待链上确认…`)
       await tx.wait()
       showNotice(`${label}成功`, 'success')
-      await refresh()
+      await Promise.all([refresh(), loadMarket()])
       return true
     } catch (error) {
       showNotice(error.shortMessage || error.reason || `${label}未完成`, 'error')
